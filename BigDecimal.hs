@@ -37,7 +37,7 @@ show_N_decimal_places n BigDecimal{integerPart=i,fractionalPart=f}
 
 
 instance Show BigDecimal where
-  show = show_N_decimal_places 50 -- show BigDecimal{integerPart=i,fractionalPart=f} = (show i) ++ "." ++ (concat $ (map show) $ (take 25) f) ++ "..."
+  show = show_N_decimal_places 50 -- show BigDecimal{integerPart=i,fractionalPart=f} = (show i) ++ "." ++ (concat $ (map show) $ (take 50) f) ++ "..."
 
 
 instance Read BigDecimal where
