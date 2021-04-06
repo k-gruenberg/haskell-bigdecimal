@@ -25,19 +25,48 @@ import Data.Ratio ((%),numerator,denominator) -- https://hackage.haskell.org/pac
 
 
 
+data Sign = Plus | Minus deriving (Eq)
 
-data BigDecimal = BigDecimal {integerPart :: Integer, fractionalPart :: [Int]} deriving (Eq) -- Equality of two BigDecimals can never be proven, only disproven!
--- using a scale to specifiy where the decimal point is (like it's done in Java's BigDecimal) wouldn't allow laziness,
---   therefore we're storing the digits after the decimal point as an infinite(always!) lazy list of digits
+instance Show Sign where
+  show Plus  = ""
+  show Minus = "-"
+
+-- conversion to and from `signum`:
+instance Enum Sign where
+  fromEnum Plus  =  1
+  fromEnum Minus = -1
+  toEnum   1  = Plus
+  toEnum (-1) = Minus
+  toEnum   0  = Plus
+  toEnum   _  = error "toEnum for Sign expects either a 1, -1 or 0, i.e. something that Prelude.signum returns"
+
+instance Num Sign where
+  x + y = undefined
+  x * y = undefined
+  abs    x      = undefined
+  negate Plus   = Minus
+  negate Minus  = Plus
+  signum Plus   = 1
+  signum Minus  = -1
+  fromInteger i = toEnum $ fromInteger i
+
+
+
+data BigDecimal = BigDecimal {sign :: Sign, integerPart :: Integer, fractionalPart :: [Int]}
+-- * Using a scale to specifiy where the decimal point is (like it's done in Java's BigDecimal) wouldn't allow laziness,
+--   therefore we're storing the digits after the decimal point as an infinite(always!) lazy list of digits.
+-- * Because 0 == -0 we have to store the sign of a BigDecimal seperately from its integerPart - otherwise we couldn't tell apart +0.1234... and -0.1234... for example!
+--   As a result, we will require that the integerPart shall always be a positive Integer!
+
 
 show_N_decimal_places :: Int -> BigDecimal -> String
-show_N_decimal_places n BigDecimal{integerPart=i,fractionalPart=f} 
-  | n <= 0    = show i
-  | otherwise = (show i) ++ "." ++ (concat $ (map show) $ (take n) f) ++ "..."
+show_N_decimal_places n BigDecimal{sign=s, integerPart=i, fractionalPart=f} 
+  | n <= 0    = (show s) ++ (show i)
+  | otherwise = (show s) ++ (show i) ++ "." ++ (concat $ (map show) $ (take n) f) ++ "..."
 
 
 instance Show BigDecimal where
-  show = show_N_decimal_places 50 -- show BigDecimal{integerPart=i,fractionalPart=f} = (show i) ++ "." ++ (concat $ (map show) $ (take 50) f) ++ "..."
+  show = show_N_decimal_places 50 
 
 
 instance Read BigDecimal where
@@ -47,29 +76,42 @@ instance Read BigDecimal where
 --   readsPrec p r = [(fromInteger i, t) | (i,t) <- readsPrec p r]  
 
 
+-- Attention!:
+-- 1) Since their decimal expansions are infinite, equality of two BigDecimals can never be proven, only disproven!
+-- 2) 2.999999... == 3.000000...
+instance Eq BigDecimal where
+  x /= y = integerPart diff /= 0 || any (/=0) (fractionalPart diff) where diff=x-y   -- x /= y iff (x-y) /= +-0  -- any (/=0) can never return False! 
+
+
+-- Attention again!:
+-- * Since equality of two BigDecimals can never be proven (only disproven), `compare` will either return LT, GT or never terminate - it will never return EQ!
+-- * compare (2.999999...) (3.000000...) should be EQ i.e. never terminate!
 instance Ord BigDecimal where
-  compare BigDecimal{integerPart=i1,fractionalPart=f1} BigDecimal{integerPart=i2,fractionalPart=f2}
-    | i1 <  i2 = LT
-    | i1 >  i2 = GT
-    | i1 == i2 = if (x < y) then LT else GT where (x,y) = head $ (dropWhile (\(x,y) -> x==y)) (zip f1 f2) -- find the first digit after the decimal point that differs!
-                 -- Equality of two BigDecimals can never be proven, only disproven!
+  compare x y = if x /= y then (if sign (x-y) == Plus then GT else LT) else EQ -- the else-case is never reached because x /= y can never return False
+  -- Note that we have to do the x /= y check to ensure that (x-y) /= 0.0000... which would means that 'sign (x-y)' could be either Plus or Minus, randomly!
+  -- The following approach doesn't consider the '2.999999... == 3.000000...' case!:
+  -- compare BigDecimal{integerPart=i1,fractionalPart=f1} BigDecimal{integerPart=i2,fractionalPart=f2}
+  --  | i1 <  i2 = LT
+  --  | i1 >  i2 = GT
+  --  | i1 == i2 = if (x < y) then LT else GT where (x,y) = head $ (dropWhile (\(x,y) -> x==y)) (zip f1 f2) -- find the first digit after the decimal point that differs!
 
 
 instance Enum BigDecimal where
-  toEnum int                                          = BigDecimal {integerPart = toInteger int, fractionalPart = [0,0..]}
-  fromEnum BigDecimal{integerPart=i,fractionalPart=f} = fromInteger i -- fromEnum 3.14 == 3 ; fromEnum (-3.14) == -3
+  toEnum int                                                  = BigDecimal {sign = toEnum $ signum int, integerPart = abs $ toInteger int, fractionalPart = [0,0..]}
+  fromEnum BigDecimal{sign=s, integerPart=i,fractionalPart=f} = (fromEnum s) * (fromInteger i) -- fromEnum 3.14 == 3 ; fromEnum (-3.14) == -3
 
 
 -- !!! Because the decimal expansion of ALL(!) BigDecimal is infinite, we have to use left-to-right addition !!!
 instance Num BigDecimal where
-  BigDecimal{integerPart=i1,fractionalPart=f1} + BigDecimal{integerPart=i2,fractionalPart=f2} = error "ToDo"
+  BigDecimal{sign=s1,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=s2,integerPart=i2,fractionalPart=f2} = error "ToDo"
 
-  BigDecimal{integerPart=i1,fractionalPart=f1} * BigDecimal{integerPart=i2,fractionalPart=f2} = error "ToDo"
+  BigDecimal{sign=s1,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=s2,integerPart=i2,fractionalPart=f2} = error "ToDo"
 
-  negate BigDecimal{integerPart=i,fractionalPart=f} = BigDecimal {integerPart = negate i, fractionalPart = f}
-  abs    BigDecimal{integerPart=i,fractionalPart=f} = BigDecimal {integerPart = abs i   , fractionalPart = f} 
-  signum BigDecimal{integerPart=i,fractionalPart=f} = BigDecimal {integerPart = signum i, fractionalPart = [0,0..]}
-  fromInteger integer                               = BigDecimal {integerPart = integer , fractionalPart = [0,0..]}
+  negate BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = negate s, integerPart = i, fractionalPart = f}
+  abs    BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = Plus, integerPart = i, fractionalPart = f} 
+  --signum BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {integerPart = signum i, fractionalPart = [0,0..]}
+  fromInteger integer                                      = BigDecimal {sign = toEnum $ fromInteger $ signum integer, integerPart = abs integer, fractionalPart = [0,0..]}
+  signum bigdec = if (bigdec /= 0) then (if sign bigdec == Plus then 1 else (-1)) else 0 -- the else-case is unreachable!
 
 
 
@@ -79,7 +121,7 @@ instance Real BigDecimal where
   toRational = toRational_precision 100 -- Setting precision=100: the number of decimalPlaces in fractionalPart to be considered
 
 toRational_precision :: Int -> BigDecimal -> Rational
-toRational_precision precision BigDecimal{integerPart=i,fractionalPart=f} = (shiftDecimalPointRight precision i f) % (10^precision)
+toRational_precision precision BigDecimal{sign=s, integerPart=i,fractionalPart=f} = (shiftDecimalPointRight precision ((toInteger $ fromEnum s) * i) f) % (10^precision)
     where shiftDecimalPointRight shift intPart fracPart = intPart*(10^(toInteger shift)) + (sum $ multiplyByPowersOfTen $ (map toInteger) $ reverse $ (take shift) fracPart)
           multiplyByPowersOfTen xs = mul 0 xs -- multiplyByPowersOfTen [1,2,3,4] == [1,20,300,4000]
           mul power []     = []
@@ -88,13 +130,15 @@ toRational_precision precision BigDecimal{integerPart=i,fractionalPart=f} = (shi
 
 
 instance Fractional BigDecimal where
-  fromRational rational = BigDecimal {integerPart = numerator rational, fractionalPart = [0,0..]} / BigDecimal {integerPart = denominator rational, fractionalPart = [0,0..]} 
-  recip BigDecimal{integerPart=i,fractionalPart=f} = BigDecimal {integerPart = error "ToDo", fractionalPart = error "ToDo"}
+  fromRational rational =
+    BigDecimal {sign = error "ToDo", integerPart = numerator rational, fractionalPart = [0,0..]}
+    / BigDecimal {sign = error "ToDo", integerPart = denominator rational, fractionalPart = [0,0..]} 
+  recip BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = error "ToDo", integerPart = error "ToDo", fractionalPart = error "ToDo"}
     -- 1/(i+f) = (i-f)/[(i+f)*(i-f)] = (i-f)/[i^2-f^2] -- not helpful :(
 
 
 instance Floating BigDecimal where
-  pi = BigDecimal {integerPart = 3, fractionalPart = tail a000796_list}         
+  pi = BigDecimal {sign = Plus, integerPart = 3, fractionalPart = tail a000796_list}         
          --[   1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7,
          -- 9, 5, 0, 2, 8, 8, 4, 1, 9, 7, 1, 6, 9, 3, 9, 9, 3, 7, 5, 1, 0, 5, 8, 2, 0, 9, 7, 4, 9, 4,
          -- 4, 5, 9, 2, 3, 0, 7, 8, 1, 6, 4, 0, 6, 2, 8, 6, 2, 0, 8, 9, 9, 8, 6, 2, 8, 0, 3, 4, 8, 2,
@@ -117,12 +161,12 @@ instance Floating BigDecimal where
 
 
 fact :: Int -> BigDecimal
-fact x = BigDecimal {integerPart = fact' $ toInteger x , fractionalPart = [0,0..]}
+fact x = BigDecimal {sign = Plus, integerPart = fact' $ toInteger x , fractionalPart = [0,0..]}
   where fact' 0 = 1
         fact' n = product [1..n]
 
 doubleFact :: Int -> BigDecimal
-doubleFact x = BigDecimal {integerPart = doubleFact' $ toInteger x , fractionalPart = [0,0..]}
+doubleFact x = BigDecimal {sign = Plus, integerPart = doubleFact' $ toInteger x , fractionalPart = [0,0..]}
   where doubleFact' :: Integer -> Integer
         doubleFact' n
           | (n == (-1) || n == 0) = 1                    -- definition copied from de.wikipedia.org # Fakultaet # Doppelfakultaet
@@ -150,8 +194,11 @@ evalInfiniteSum = error "ToDo"
 
 
 
-instance RealFrac BigDecimal where
-  properFraction BigDecimal{integerPart=i,fractionalPart=f} = (fromInteger i, BigDecimal{integerPart=0, fractionalPart=f}) -- properFraction 3.14 == (3,0.14000000000000012)
+instance RealFrac BigDecimal where -- properFraction :: (RealFrac a, Integral b) => a -> (b, a)
+  properFraction BigDecimal{sign=s,integerPart=i,fractionalPart=f}
+    = ( fromInteger ( (toInteger $ fromEnum s) * i ) , BigDecimal{sign=s, integerPart=0, fractionalPart=f} )
+-- properFraction   3.14  == (3,0.14000000000000012)
+-- properFraction (-3.14) == (-3,-0.14000000000000012)
 
 
 -- instance RealFloat BigDecimal where -- impossible because BigDecimal is NOT an actual floating point number
