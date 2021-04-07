@@ -25,6 +25,11 @@ import Data.Ratio ((%),numerator,denominator) -- https://hackage.haskell.org/pac
 
 
 
+
+
+
+
+
 data Sign = Plus | Minus deriving (Eq)
 
 instance Show Sign where
@@ -49,6 +54,11 @@ instance Num Sign where
   signum Plus   = 1
   signum Minus  = -1
   fromInteger i = toEnum $ fromInteger i
+
+
+
+
+
 
 
 
@@ -103,15 +113,41 @@ instance Enum BigDecimal where
 
 -- !!! Because the decimal expansion of ALL(!) BigDecimal is infinite, we have to use left-to-right addition !!!
 instance Num BigDecimal where
-  BigDecimal{sign=s1,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=s2,integerPart=i2,fractionalPart=f2} = error "ToDo"
+  -- ===== ===== BigDecimal Addition: ===== =====
+  BigDecimal{sign=Minus,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=Minus,integerPart=i2,fractionalPart=f2} = -- (-x)+(-y) == -(x+y)
+      negate BigDecimal{sign=Plus,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2} 
+  BigDecimal{sign=Minus,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=Plus ,integerPart=i2,fractionalPart=f2} = -- (-x)+y == y+(-x)
+      BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2} + BigDecimal{sign=Minus,integerPart=i1,fractionalPart=f1}
+  BigDecimal{sign=Plus ,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=Plus ,integerPart=i2,fractionalPart=f2} = error "ToDo: x+y"
+  BigDecimal{sign=Plus ,integerPart=i1,fractionalPart=f1} + BigDecimal{sign=Minus,integerPart=i2,fractionalPart=f2} = error "ToDo: x-y"
 
-  BigDecimal{sign=s1,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=s2,integerPart=i2,fractionalPart=f2} = error "ToDo"
+
+  -- ===== ===== BigDecimal Multiplication: ===== =====
+  BigDecimal{sign=Minus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Plus ,integerPart=i2,fractionalPart=f2} = -- (-x)*y = -(x*y)
+      negate BigDecimal{sign=Plus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2} 
+  BigDecimal{sign=Plus ,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Minus,integerPart=i2,fractionalPart=f2} = -- x*(-y) = -(x*y)
+      negate BigDecimal{sign=Plus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2}
+  BigDecimal{sign=Minus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Minus,integerPart=i2,fractionalPart=f2} = -- (-x)*(-y) = x*y
+      BigDecimal{sign=Plus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2} 
+  -- From now on, we can assume that both factors are positve:
+  -- We will split the multiplication into four parts: (i1+f1)*(i2+f2) = i1*i2 + i1*f2 + f1*i2 + f1*f2
+  BigDecimal{sign=Plus,integerPart=i1,fractionalPart=f1} * BigDecimal{sign=Plus,integerPart=i2,fractionalPart=f2} =
+      BigDecimal{sign=Plus, integerPart=i1*i2, fractionalPart=[0,0..]} -- i1*i2
+    + mulIntFraction i1 f2 -- i1*f2
+    + mulIntFraction i2 f1 -- f1*i2
+    + BigDecimal{sign=Plus, integerPart=0, fractionalPart=mulFractionFraction f1 f1} -- f1*f2
+    where mulIntFraction :: Integer -> [Int] -> BigDecimal
+          mulIntFraction = error "ToDo"
+          
+          mulFractionFraction :: [Int] -> [Int] -> [Int]
+          mulFractionFraction = error "ToDo"
+
 
   negate BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = negate s, integerPart = i, fractionalPart = f}
   abs    BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = Plus, integerPart = i, fractionalPart = f} 
-  --signum BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {integerPart = signum i, fractionalPart = [0,0..]}
   fromInteger integer                                      = BigDecimal {sign = toEnum $ fromInteger $ signum integer, integerPart = abs integer, fractionalPart = [0,0..]}
   signum bigdec = if (bigdec /= 0) then (if sign bigdec == Plus then 1 else (-1)) else 0 -- the else-case is unreachable!
+
 
 
 
@@ -129,11 +165,16 @@ toRational_precision precision BigDecimal{sign=s, integerPart=i,fractionalPart=f
 
 
 
-instance Fractional BigDecimal where
+instance Fractional BigDecimal where -- one needs to implement either ‘recip’ or ‘/’
   fromRational rational =
-    BigDecimal {sign = error "ToDo", integerPart = numerator rational, fractionalPart = [0,0..]}
-    / BigDecimal {sign = error "ToDo", integerPart = denominator rational, fractionalPart = [0,0..]} 
-  recip BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = error "ToDo", integerPart = error "ToDo", fractionalPart = error "ToDo"}
+    BigDecimal {sign = toEnum $ fromInteger $ signum $ numerator rational, integerPart = abs $ numerator rational, fractionalPart = [0,0..]}
+    / BigDecimal {sign = Plus, integerPart = denominator rational, fractionalPart = [0,0..]} -- as you can see below the denominator of a Rationals is always +
+  -- numerator   (3 % (-4)) == (-3)
+  -- denominator (3 % (-4)) == 4
+  -- numerator   ((-3) % (-4)) == 3
+  -- denominator ((-3) % (-4)) == 4
+
+  recip BigDecimal{sign=s,integerPart=i,fractionalPart=f} = BigDecimal {sign = s, integerPart = error "ToDo", fractionalPart = error "ToDo"}
     -- 1/(i+f) = (i-f)/[(i+f)*(i-f)] = (i-f)/[i^2-f^2] -- not helpful :(
 
 
