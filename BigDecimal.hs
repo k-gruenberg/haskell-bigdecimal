@@ -26,6 +26,7 @@
 
 module BigDecimal (
   BigDecimal,
+  (~==),                 -- :: BigDecimal -> BigDecimal -> Bool
   show_N_decimal_places, -- :: Int -> BigDecimal -> String
   print_BigDecimal,      -- :: BigDecimal -> IO ()
   toRational_precision,  -- :: Int -> BigDecimal -> Rational
@@ -65,8 +66,8 @@ instance Num Sign where
   abs    x      = undefined
   negate Plus   = Minus
   negate Minus  = Plus
-  signum Plus   = 1
-  signum Minus  = -1
+  signum Plus   = Plus  -- 1
+  signum Minus  = Minus -- -1
   fromInteger i = toEnum $ fromInteger i
 
 
@@ -114,6 +115,11 @@ instance Read BigDecimal where
 -- 2) 2.999999... == 3.000000...
 instance Eq BigDecimal where
   x /= y = integerPart diff /= 0 || any (/=0) (fractionalPart diff) where diff=x-y   -- x /= y iff (x-y) /= +-0  -- any (/=0) can never return False! 
+
+
+-- Operator to check whether two BigDecimals are approximately equal - always terminates, unlike (==):
+(~==) :: BigDecimal -> BigDecimal -> Bool
+x ~== y = integerPart diff == 0 && all (==0) (take 100 (fractionalPart diff)) where diff=x-y
 
 
 -- Attention again!:
@@ -173,10 +179,13 @@ instance Num BigDecimal where
           --     + ...
           --   Evaluate that infinite sum using `evalInfiniteSum` (as it's strictly decreasing!)
           mulIntFraction :: Integer -> [DecDigit] -> BigDecimal
-          mulIntFraction int fraction = evalInfiniteSum [mul int (fraction!!digitPos) digitPos | digitPos <- [1..]::[Int] ]
+          mulIntFraction int fraction = evalInfiniteSum [mul int (fraction!!(digitPos-1)) digitPos | digitPos <- [1..]::[Int] ]
 
-          mul :: Integer -> DecDigit -> Int -> BigDecimal -- e.g. mul 12 3 3 == 0.036 (see above)
-          mul intFactor digit position = BigDecimal{sign=Plus, integerPart=error "ToDo", fractionalPart=error "ToDo"}
+          mul :: Integer -> DecDigit -> Int -> BigDecimal -- == intFactor * digit * 10^(-position) ; e.g. mul 12 3 3 == 0.036 (see above)
+          mul intFactor digit position
+            | noOfCarryDigits < position = BigDecimal{sign=Plus, integerPart=0, fractionalPart=error "ToDo"}
+            | otherwise                  = BigDecimal{sign=Plus, integerPart=error "ToDo", fractionalPart=error "ToDo"}
+              where noOfCarryDigits = length (show (intFactor*(toInteger digit))) - 1 -- (== 1 for the 0.036 example above)
           
           -- Idea: 0.232323... * 0.454545... =
           --       2 * 0.454545... << 1
@@ -338,8 +347,21 @@ instance RealFrac BigDecimal where -- properFraction :: (RealFrac a, Integral b)
 -- To be more precise: When one of the numbers begins with n zeros, this function assumes that all the numbers that follow will also begin with at least n zeros!
 --
 evalInfiniteSum :: [BigDecimal] -> BigDecimal
-evalInfiniteSum = error "ToDo: evalInfiniteSum"
+evalInfiniteSum nums = BigDecimal {sign           = toEnum $ fromInteger $ signum (infiniteSumWithCarry!!0),
+                                   integerPart    = abs (infiniteSumWithCarry!!0),
+                                   fractionalPart = (map fromInteger) $ tail $ infiniteSumWithCarry}
 
+  where integerPartSum          = sum $ takeWhile (/=0) (map (\num -> (toInteger $ fromEnum $ sign num) * integerPart num) nums)         :: Integer
+        columnSum n             = sum $ takeWhile (/=0) (map (\num -> toInteger ((fractionalPart num)!!n * (fromEnum $ sign num))) nums) :: Integer -- sum of the n-th column
+        infiniteSumWithoutCarry = integerPartSum : [columnSum n | n <- [0..]::[Int]] -- the 0th element in this list (integerPartSum) is the only one allowed to be >9 or <0 ...
+        -- Now comes the difficult part: carrying from left to right:
+        infiniteSumWithCarry    = carry infiniteSumWithoutCarry
+        
+        carry :: [Integer] -> [Integer] -- e.g. carry [1,2,3,4,5,6,7,8,9,10,0,0,0,0...] == [1,2,3,4,5,6,7,9,0,0,0,0...] (also has to deal with the numbers being negative!)
+        carry (a:b:cs)
+          | b > 9     = (a + (b `div` 10)):(carry ((b `mod` 10):cs)) -- e.g. carry [4,23,...] == 6:(carry 3:...)
+          | b < 0     = error "ToDo"
+          | otherwise =  a                :(carry ( b          :cs))
 
 
 
